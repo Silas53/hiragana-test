@@ -1,0 +1,562 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Kana Quiz (MCQ + Romaji Typing)</title>
+  <style>
+    :root{
+      --bg:#0f172a; --panel:#0b1220; --card:#111827;
+      --border:rgba(148,163,184,.2); --text:#e2e8f0; --muted:#94a3b8;
+      --good:#16a34a; --bad:#ef4444;
+    }
+
+    /* +2 font sizes overall */
+    body{
+      margin:0;
+      font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,"Noto Sans CJK SC",sans-serif;
+      background:var(--bg);
+      color:var(--text);
+      font-size:18px;
+    }
+
+    header{
+      padding:16px 20px;
+      border-bottom:1px solid var(--border);
+      display:flex;
+      justify-content:space-between;
+      gap:12px;
+      flex-wrap:wrap;
+      align-items:center
+    }
+
+    .stats{display:flex;gap:14px;flex-wrap:wrap;color:#cbd5e1;font-size:16px}
+    main{max-width:920px;margin:0 auto;padding:20px}
+    .panel{background:var(--panel);border:1px solid var(--border);border-radius:16px;padding:16px;box-shadow:0 10px 20px rgba(0,0,0,.25)}
+    .row{display:flex;gap:12px;flex-wrap:wrap;align-items:center;justify-content:space-between}
+    .btn{background:var(--card);color:var(--text);border:1px solid rgba(148,163,184,.25);border-radius:12px;padding:10px 12px;font-size:16px;cursor:pointer}
+    .btn:hover{border-color:rgba(148,163,184,.6)}
+    .btn.primary{border-color:rgba(99,102,241,.6)}
+    .btn:disabled{opacity:.5;cursor:not-allowed}
+    .muted{color:var(--muted);font-size:15px;line-height:1.55}
+    .bigkana{font-size:84px;line-height:1.05;text-align:center;margin:12px 0 8px}
+    .stage{font-size:15px;color:var(--muted);text-align:center}
+    .qtitle{font-size:20px;margin:8px 0 2px;text-align:center}
+    .timerwrap{margin-top:10px}
+    .bar{height:10px;background:#0b1220;border:1px solid var(--border);border-radius:999px;overflow:hidden}
+    .bar > div{height:100%;width:100%;background:rgba(99,102,241,.85)}
+    .timeleft{margin-top:8px;text-align:center;color:#cbd5e1;font-size:16px}
+    .grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin-top:14px}
+    .choice{
+      background:var(--card);border:1px solid rgba(148,163,184,.22);border-radius:14px;
+      padding:14px;font-size:20px;text-align:center;cursor:pointer;user-select:none;
+      transition:transform .06s ease;
+    }
+    .choice:active{transform:scale(.99)}
+    .choice.correct{border-color:rgba(34,197,94,.8)}
+    .choice.wrong{border-color:rgba(239,68,68,.8)}
+    .inputrow{display:flex;gap:10px;flex-wrap:wrap;justify-content:center;margin-top:14px}
+    input{
+      background:var(--card);color:var(--text);border:1px solid rgba(148,163,184,.25);
+      border-radius:12px;padding:12px 12px;font-size:20px;min-width:240px;
+    }
+    .feedback{margin-top:12px;text-align:center;font-size:16px;color:#cbd5e1;min-height:22px}
+    .feedback .ok{color:#86efac}
+    .feedback .no{color:#fca5a5}
+    .scorebox{display:grid;grid-template-columns:1fr;gap:10px;margin-top:14px}
+    .kpi{display:flex;justify-content:space-between;gap:12px;color:#cbd5e1;font-size:16px;background:var(--card);border:1px solid var(--border);border-radius:14px;padding:12px}
+    .kpi b{color:var(--text)}
+    .list{margin-top:12px;background:var(--card);border:1px solid var(--border);border-radius:14px;padding:12px;color:#cbd5e1;font-size:15px;line-height:1.55}
+    .hidden{display:none}
+  </style>
+</head>
+<body>
+<header>
+  <div class="stats">
+    <div>Mode: <span id="stageName">Not started</span></div>
+    <div>Question: <span id="qIndex">0</span>/<span id="qTotal">35</span></div>
+    <div>Time left: <span id="tLeft">15</span>s</div>
+    <div>Score: <span id="score">0</span>/100</div>
+  </div>
+  <div class="stats">
+    <div>MCQ: <span id="mcDone">0</span>/20</div>
+    <div>Typing: <span id="tyDone">0</span>/15</div>
+  </div>
+</header>
+
+<main>
+  <!-- Start -->
+  <section id="screenStart" class="panel">
+    <div class="row">
+      <div>
+        <div style="font-size:20px;margin-bottom:4px">Kana Quiz (MCQ + Romaji Typing)</div>
+        <div class="muted">
+          Rules: 15s per question. 20 MCQs (2 pts each) + 15 typing questions (4 pts each). Total 100 pts.<br>
+          Scoring: Wrong or timeout = 0. Correct: time left ≥10s = full; ≥5s = half; &lt;5s = minimum (MCQ 0.5, Typing 1).<br>
+          Questions are sampled randomly from the full hiragana sound pool, with no repeats across 35 questions.
+        </div>
+      </div>
+      <button class="btn primary" id="btnStart">Start</button>
+    </div>
+    <div class="list">
+      Classroom use: ask students to screenshot the final score. For each mistake, write the kana and romaji three times.
+    </div>
+  </section>
+
+  <!-- Quiz -->
+  <section id="screenQuiz" class="panel hidden">
+    <div class="stage" id="stageHint">—</div>
+    <div class="bigkana" id="kanaChar">あ</div>
+    <div class="qtitle" id="qPrompt">Choose the correct romaji</div>
+
+    <div class="timerwrap">
+      <div class="bar"><div id="barFill"></div></div>
+      <div class="timeleft">Remaining: <span id="timeLeftText">15</span>s</div>
+    </div>
+
+    <!-- MCQ -->
+    <div id="mcqArea" class="grid"></div>
+
+    <!-- Typing -->
+    <div id="typeArea" class="hidden">
+      <div class="inputrow">
+        <input id="romajiInput" autocomplete="off" spellcheck="false" placeholder="Type romaji, e.g., shi / tsu / kya" />
+        <button class="btn primary" id="btnSubmit">Submit</button>
+      </div>
+      <div class="muted" style="text-align:center;margin-top:8px">
+        Input rules: case-insensitive; spaces are ignored. For ぢ/づ, answers are ji2/zu2 to avoid confusion with じ/ず.
+      </div>
+    </div>
+
+    <div class="feedback" id="feedback"></div>
+
+    <div class="row" style="margin-top:10px">
+      <div class="muted" id="scoreRuleHint">—</div>
+      <button class="btn" id="btnSkip">Skip (0 pts)</button>
+    </div>
+  </section>
+
+  <!-- End -->
+  <section id="screenEnd" class="panel hidden">
+    <div style="font-size:20px;margin-bottom:6px">Finished</div>
+    <div class="scorebox">
+      <div class="kpi"><span>Total</span><b><span id="finalScore">0</span>/100</b></div>
+      <div class="kpi"><span>MCQ score (max 40)</span><b><span id="finalMc">0</span></b></div>
+      <div class="kpi"><span>Typing score (max 60)</span><b><span id="finalTy">0</span></b></div>
+      <div class="kpi"><span>Correct</span><b><span id="finalCorrect">0</span>/35</b></div>
+    </div>
+
+    <div class="list" id="mistakeList">Mistakes: none</div>
+
+    <div class="row" style="margin-top:12px">
+      <button class="btn primary" id="btnRestart">Play again</button>
+    </div>
+  </section>
+</main>
+
+<script>
+/* ===================== Hiragana sound pool (basic + dakuon/handakuon + yoon) ===================== */
+/* Unique key (romaji) identifies each sound item. */
+const KANA = [
+  // Basic
+  ["a","あ"],["i","い"],["u","う"],["e","え"],["o","お"],
+  ["ka","か"],["ki","き"],["ku","く"],["ke","け"],["ko","こ"],
+  ["sa","さ"],["shi","し"],["su","す"],["se","せ"],["so","そ"],
+  ["ta","た"],["chi","ち"],["tsu","つ"],["te","て"],["to","と"],
+  ["na","な"],["ni","に"],["nu","ぬ"],["ne","ね"],["no","の"],
+  ["ha","は"],["hi","ひ"],["fu","ふ"],["he","へ"],["ho","ほ"],
+  ["ma","ま"],["mi","み"],["mu","む"],["me","め"],["mo","も"],
+  ["ya","や"],["yu","ゆ"],["yo","よ"],
+  ["ra","ら"],["ri","り"],["ru","る"],["re","れ"],["ro","ろ"],
+  ["wa","わ"],["wo","を"],["n","ん"],
+  // Dakuon / Handakuon
+  ["ga","が"],["gi","ぎ"],["gu","ぐ"],["ge","げ"],["go","ご"],
+  ["za","ざ"],["ji","じ"],["zu","ず"],["ze","ぜ"],["zo","ぞ"],
+  ["da","だ"],["ji2","ぢ"],["zu2","づ"],["de","で"],["do","ど"],
+  ["ba","ば"],["bi","び"],["bu","ぶ"],["be","べ"],["bo","ぼ"],
+  ["pa","ぱ"],["pi","ぴ"],["pu","ぷ"],["pe","ぺ"],["po","ぽ"],
+  // Yoon (common)
+  ["kya","きゃ"],["kyu","きゅ"],["kyo","きょ"],
+  ["gya","ぎゃ"],["gyu","ぎゅ"],["gyo","ぎょ"],
+  ["sha","しゃ"],["shu","しゅ"],["sho","しょ"],
+  ["ja","じゃ"],["ju","じゅ"],["jo","じょ"],
+  ["cha","ちゃ"],["chu","ちゅ"],["cho","ちょ"],
+  ["nya","にゃ"],["nyu","にゅ"],["nyo","にょ"],
+  ["hya","ひゃ"],["hyu","ひゅ"],["hyo","ひょ"],
+  ["bya","びゃ"],["byu","びゅ"],["byo","びょ"],
+  ["pya","ぴゃ"],["pyu","ぴゅ"],["pyo","ぴょ"],
+  ["mya","みゃ"],["myu","みゅ"],["myo","みょ"],
+  ["rya","りゃ"],["ryu","りゅ"],["ryo","りょ"],
+];
+
+/* ===================== Utilities ===================== */
+function shuffle(arr){
+  for(let i=arr.length-1;i>0;i--){
+    const j=Math.floor(Math.random()*(i+1));
+    [arr[i],arr[j]]=[arr[j],arr[i]];
+  }
+  return arr;
+}
+function normRomaji(s){
+  return s.toLowerCase().replace(/\s+/g,"");
+}
+function clamp(n,min,max){return Math.max(min,Math.min(max,n));}
+
+/* ===================== Rules ===================== */
+const MCQ_COUNT = 20;
+const TYPE_COUNT = 15;
+const TOTAL_Q = MCQ_COUNT + TYPE_COUNT;
+const TIME_PER_Q = 15;
+
+const MCQ_FULL = 2;
+const TYPE_FULL = 4;
+
+/* Delay rules */
+const DELAY_CORRECT_MS = 700;
+const DELAY_WRONG_MS = 2000;
+
+/* Full: timeLeft>=10; Half: timeLeft>=5; else minimum */
+function scoreForCorrect(maxScore, timeLeft){
+  if(timeLeft >= 10) return maxScore;
+  if(timeLeft >= 5) return maxScore/2;
+  return (maxScore === MCQ_FULL) ? 0.5 : 1;
+}
+
+/* ===================== DOM ===================== */
+const screenStart = document.getElementById("screenStart");
+const screenQuiz  = document.getElementById("screenQuiz");
+const screenEnd   = document.getElementById("screenEnd");
+
+const btnStart    = document.getElementById("btnStart");
+const btnRestart  = document.getElementById("btnRestart");
+const btnSkip     = document.getElementById("btnSkip");
+
+const stageName   = document.getElementById("stageName");
+const stageHint   = document.getElementById("stageHint");
+const qIndexEl    = document.getElementById("qIndex");
+const qTotalEl    = document.getElementById("qTotal");
+const tLeftEl     = document.getElementById("tLeft");
+const scoreEl     = document.getElementById("score");
+const mcDoneEl    = document.getElementById("mcDone");
+const tyDoneEl    = document.getElementById("tyDone");
+
+const kanaChar    = document.getElementById("kanaChar");
+const qPrompt     = document.getElementById("qPrompt");
+
+const barFill     = document.getElementById("barFill");
+const timeLeftText= document.getElementById("timeLeftText");
+
+const mcqArea     = document.getElementById("mcqArea");
+const typeArea    = document.getElementById("typeArea");
+const romajiInput = document.getElementById("romajiInput");
+const btnSubmit   = document.getElementById("btnSubmit");
+
+const feedback    = document.getElementById("feedback");
+const scoreRuleHint = document.getElementById("scoreRuleHint");
+
+/* End screen */
+const finalScore  = document.getElementById("finalScore");
+const finalMc     = document.getElementById("finalMc");
+const finalTy     = document.getElementById("finalTy");
+const finalCorrect= document.getElementById("finalCorrect");
+const mistakeList = document.getElementById("mistakeList");
+
+/* ===================== State ===================== */
+let questions = []; // {mode:'mcq'|'type', key, hira}
+let qPtr = 0;
+
+let timer = null;
+let timeLeft = TIME_PER_Q;
+
+let scoreTotal = 0;
+let scoreMc = 0;
+let scoreTy = 0;
+
+let correctCount = 0;
+let mistakes = []; // {hira, key, answer, correctKey, mode, timedOut}
+
+function setHeader(){
+  qTotalEl.textContent = String(TOTAL_Q);
+  qIndexEl.textContent = String(qPtr);
+  tLeftEl.textContent = String(timeLeft);
+  scoreEl.textContent = String(scoreTotal.toFixed(1)).replace(/\.0$/,"");
+
+  const mcDone = Math.min(qPtr, MCQ_COUNT);
+  const tyDone = Math.max(0, qPtr - MCQ_COUNT);
+  mcDoneEl.textContent = String(mcDone);
+  tyDoneEl.textContent = String(tyDone);
+
+  if(qPtr === 0) stageName.textContent = "Not started";
+  else if(qPtr <= MCQ_COUNT) stageName.textContent = "MCQ";
+  else if(qPtr <= TOTAL_Q) stageName.textContent = "Romaji typing";
+}
+
+function stopTimer(){
+  clearInterval(timer);
+  timer = null;
+}
+
+function startTimerForQuestion(){
+  stopTimer();
+  timeLeft = TIME_PER_Q;
+  updateTimerUI();
+  timer = setInterval(()=>{
+    timeLeft--;
+    updateTimerUI();
+    if(timeLeft <= 0){
+      stopTimer();
+      handleTimeout();
+    }
+  }, 1000);
+}
+
+function updateTimerUI(){
+  tLeftEl.textContent = String(timeLeft);
+  timeLeftText.textContent = String(timeLeft);
+  const pct = clamp((timeLeft / TIME_PER_Q) * 100, 0, 100);
+  barFill.style.width = pct + "%";
+}
+
+/* ===================== Build questions: 35 unique hiragana items ===================== */
+function buildQuestions(){
+  if(KANA.length < TOTAL_Q) throw new Error("The pool is too small to sample 35 unique questions.");
+
+  const picked = shuffle([...KANA]).slice(0, TOTAL_Q); // unique items
+  const q = [];
+  for(let i=0;i<TOTAL_Q;i++){
+    const [key, hira] = picked[i];
+    q.push({
+      mode: (i < MCQ_COUNT) ? "mcq" : "type",
+      key, hira
+    });
+  }
+  return q;
+}
+
+/* ===================== Render ===================== */
+function renderQuestion(){
+  feedback.innerHTML = "";
+  mcqArea.innerHTML = "";
+  romajiInput.value = "";
+  romajiInput.disabled = false;
+  btnSubmit.disabled = false;
+  btnSkip.disabled = false;
+
+  setHeader();
+
+  if(qPtr >= TOTAL_Q){
+    finishGame();
+    return;
+  }
+
+  const q = questions[qPtr];
+  kanaChar.textContent = q.hira;
+
+  if(q.mode === "mcq"){
+    stageHint.textContent = `MCQ (Q${qPtr+1} / ${TOTAL_Q})`;
+    qPrompt.textContent = "Choose the correct romaji";
+    scoreRuleHint.textContent = "Worth 2 pts: ≥10s = 2; ≥5s = 1; <5s = 0.5; wrong/timeout = 0.";
+
+    mcqArea.classList.remove("hidden");
+    typeArea.classList.add("hidden");
+
+    const options = buildMcqOptions(q.key);
+    options.forEach(opt=>{
+      const div = document.createElement("div");
+      div.className = "choice";
+      div.textContent = opt;
+      div.addEventListener("click", ()=>submitMcq(opt));
+      mcqArea.appendChild(div);
+    });
+
+  }else{
+    stageHint.textContent = `Romaji typing (Q${qPtr+1} / ${TOTAL_Q})`;
+    qPrompt.textContent = "Type the correct romaji";
+    scoreRuleHint.textContent = "Worth 4 pts: ≥10s = 4; ≥5s = 2; <5s = 1; wrong/timeout = 0.";
+
+    mcqArea.classList.add("hidden");
+    typeArea.classList.remove("hidden");
+    setTimeout(()=>romajiInput.focus(), 50);
+  }
+
+  startTimerForQuestion();
+}
+
+function buildMcqOptions(correctKey){
+  // 3 distractors from other keys; unique within the same question
+  const keys = KANA.map(x=>x[0]).filter(k=>k !== correctKey);
+  shuffle(keys);
+  const distractors = keys.slice(0,3);
+  return shuffle([correctKey, ...distractors]);
+}
+
+/* ===================== Submit & scoring ===================== */
+function lockInputs(){
+  btnSkip.disabled = true;
+  romajiInput.disabled = true;
+  btnSubmit.disabled = true;
+  [...mcqArea.querySelectorAll(".choice")].forEach(x=>x.style.pointerEvents="none");
+}
+
+function awardPoints(mode, points){
+  scoreTotal += points;
+  if(mode === "mcq") scoreMc += points;
+  else scoreTy += points;
+
+  scoreEl.textContent = scoreTotal.toFixed(1).replace(/\.0$/,"");
+}
+
+function showCorrectChoiceVisual(correctKey, selectedKey){
+  [...mcqArea.querySelectorAll(".choice")].forEach(div=>{
+    if(div.textContent === correctKey) div.classList.add("correct");
+    if(div.textContent === selectedKey && selectedKey !== correctKey) div.classList.add("wrong");
+  });
+}
+
+function submitMcq(selected){
+  stopTimer();
+  lockInputs();
+
+  const q = questions[qPtr];
+  const isCorrect = (selected === q.key);
+  const pts = isCorrect ? scoreForCorrect(MCQ_FULL, timeLeft) : 0;
+
+  showCorrectChoiceVisual(q.key, selected);
+
+  if(isCorrect){
+    awardPoints("mcq", pts);
+    correctCount++;
+    feedback.innerHTML = `<span class="ok">Correct</span>. Points: ${pts}.`;
+  }else{
+    mistakes.push({hira:q.hira, key:q.key, answer:selected, correctKey:q.key, mode:"mcq", timedOut:false});
+    feedback.innerHTML = `<span class="no">Wrong</span>. Correct answer: <b>${q.key}</b>. Points: 0.`;
+  }
+
+  setTimeout(nextQuestion, isCorrect ? DELAY_CORRECT_MS : DELAY_WRONG_MS);
+}
+
+function submitTyping(){
+  stopTimer();
+  lockInputs();
+
+  const q = questions[qPtr];
+  const typed = normRomaji(romajiInput.value);
+  const isCorrect = (typed === normRomaji(q.key));
+  const pts = isCorrect ? scoreForCorrect(TYPE_FULL, timeLeft) : 0;
+
+  if(isCorrect){
+    awardPoints("type", pts);
+    correctCount++;
+    feedback.innerHTML = `<span class="ok">Correct</span>. Points: ${pts}.`;
+  }else{
+    mistakes.push({hira:q.hira, key:q.key, answer:typed || "(empty)", correctKey:q.key, mode:"type", timedOut:false});
+    feedback.innerHTML = `<span class="no">Wrong</span>. Correct answer: <b>${q.key}</b>. Points: 0.`;
+  }
+
+  setTimeout(nextQuestion, isCorrect ? DELAY_CORRECT_MS : DELAY_WRONG_MS);
+}
+
+function handleTimeout(){
+  lockInputs();
+  const q = questions[qPtr];
+  mistakes.push({hira:q.hira, key:q.key, answer:"(timeout)", correctKey:q.key, mode:q.mode, timedOut:true});
+  feedback.innerHTML = `<span class="no">Time’s up</span>. Points: 0. Correct answer: <b>${q.key}</b>.`;
+  setTimeout(nextQuestion, DELAY_WRONG_MS);
+}
+
+function skipQuestion(){
+  stopTimer();
+  lockInputs();
+  const q = questions[qPtr];
+  mistakes.push({hira:q.hira, key:q.key, answer:"(skipped)", correctKey:q.key, mode:q.mode, timedOut:false});
+  feedback.innerHTML = `<span class="no">Skipped</span>. Points: 0. Correct answer: <b>${q.key}</b>.`;
+  setTimeout(nextQuestion, DELAY_WRONG_MS);
+}
+
+function nextQuestion(){
+  qPtr++;
+  setHeader();
+  renderQuestion();
+}
+
+/* ===================== Finish ===================== */
+function finishGame(){
+  stopTimer();
+  screenQuiz.classList.add("hidden");
+  screenEnd.classList.remove("hidden");
+
+  finalScore.textContent = scoreTotal.toFixed(1).replace(/\.0$/,"");
+  finalMc.textContent = scoreMc.toFixed(1).replace(/\.0$/,"");
+  finalTy.textContent = scoreTy.toFixed(1).replace(/\.0$/,"");
+  finalCorrect.textContent = String(correctCount);
+
+  if(mistakes.length === 0){
+    mistakeList.textContent = "Mistakes: none";
+  }else{
+    // unique mistakes (by kana + answer key + mode), keep order
+    const seen = new Set();
+    const lines = [];
+    for(const m of mistakes){
+      const k = `${m.hira}|${m.correctKey}|${m.mode}`;
+      if(seen.has(k)) continue;
+      seen.add(k);
+      const modeName = m.mode === "mcq" ? "MCQ" : "Typing";
+      const extra = m.timedOut ? ", timeout" : "";
+      lines.push(`${m.hira} → correct: ${m.correctKey}; yours: ${m.answer} (${modeName}${extra})`);
+    }
+    mistakeList.innerHTML = `<b>Mistakes (unique)</b><br>` + lines.join("<br>");
+  }
+}
+
+/* ===================== Start / restart ===================== */
+function resetAll(){
+  stopTimer();
+  questions = buildQuestions();
+  qPtr = 0;
+
+  scoreTotal = 0;
+  scoreMc = 0;
+  scoreTy = 0;
+  correctCount = 0;
+  mistakes = [];
+
+  setHeader();
+
+  screenStart.classList.add("hidden");
+  screenEnd.classList.add("hidden");
+  screenQuiz.classList.remove("hidden");
+
+  renderQuestion();
+}
+
+btnStart.addEventListener("click", resetAll);
+
+btnRestart.addEventListener("click", ()=>{
+  screenEnd.classList.add("hidden");
+  screenStart.classList.remove("hidden");
+  stageName.textContent = "Not started";
+  qIndexEl.textContent = "0";
+  scoreEl.textContent = "0";
+  mcDoneEl.textContent = "0";
+  tyDoneEl.textContent = "0";
+  tLeftEl.textContent = String(TIME_PER_Q);
+  timeLeftText.textContent = String(TIME_PER_Q);
+  barFill.style.width = "100%";
+});
+
+btnSkip.addEventListener("click", skipQuestion);
+btnSubmit.addEventListener("click", submitTyping);
+
+romajiInput.addEventListener("keydown", (e)=>{
+  if(e.key === "Enter"){
+    e.preventDefault();
+    submitTyping();
+  }
+});
+
+/* Init header */
+qTotalEl.textContent = String(TOTAL_Q);
+stageName.textContent = "Not started";
+</script>
+</body>
+</html>
