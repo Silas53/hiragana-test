@@ -11,13 +11,12 @@
       --good:#16a34a; --bad:#ef4444;
     }
 
-    /* +2 font sizes overall */
     body{
       margin:0;
       font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,"Noto Sans CJK SC",sans-serif;
       background:var(--bg);
       color:var(--text);
-      font-size:18px;
+      font-size:18px; /* +2 sizes overall */
     }
 
     header{
@@ -48,13 +47,27 @@
     .timeleft{margin-top:8px;text-align:center;color:#cbd5e1;font-size:16px}
     .grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin-top:14px}
     .choice{
-      background:var(--card);border:1px solid rgba(148,163,184,.22);border-radius:14px;
-      padding:14px;font-size:20px;text-align:center;cursor:pointer;user-select:none;
+      background:var(--card);
+      border:1px solid rgba(148,163,184,.22);
+      border-radius:14px;
+      padding:14px;
+      font-size:20px;
+      text-align:center;
+      cursor:pointer;
+      user-select:none;
       transition:transform .06s ease;
     }
     .choice:active{transform:scale(.99)}
-    .choice.correct{border-color:rgba(34,197,94,.8)}
-    .choice.wrong{border-color:rgba(239,68,68,.8)}
+    .choice.correct{
+      border-color:rgba(34,197,94,.8);
+      background:rgba(34,197,94,.18);
+    }
+    .choice.wrong{
+      border-color:rgba(239,68,68,.9);
+      background:rgba(239,68,68,.22); /* red background for wrong option */
+      cursor:not-allowed;
+    }
+
     .inputrow{display:flex;gap:10px;flex-wrap:wrap;justify-content:center;margin-top:14px}
     input{
       background:var(--card);color:var(--text);border:1px solid rgba(148,163,184,.25);
@@ -70,12 +83,13 @@
     .hidden{display:none}
   </style>
 </head>
+
 <body>
 <header>
   <div class="stats">
     <div>Mode: <span id="stageName">Not started</span></div>
     <div>Question: <span id="qIndex">0</span>/<span id="qTotal">35</span></div>
-    <div>Time left: <span id="tLeft">15</span>s</div>
+    <div>Time left: <span id="tLeft">30</span>s</div>
     <div>Score: <span id="score">0</span>/100</div>
   </div>
   <div class="stats">
@@ -91,15 +105,16 @@
       <div>
         <div style="font-size:20px;margin-bottom:4px">Kana Quiz (MCQ + Romaji Typing)</div>
         <div class="muted">
-          Rules: 15s per question. 20 MCQs (2 pts each) + 15 typing questions (4 pts each). Total 100 pts.<br>
-          Scoring: Wrong or timeout = 0. Correct: time left ≥10s = full; ≥5s = half; &lt;5s = minimum (MCQ 0.5, Typing 1).<br>
-          Questions are sampled randomly from the full hiragana sound pool, with no repeats across 35 questions.
+          Rules: 30s per question. 20 MCQs + 15 typing questions. Total 100 pts.<br>
+          Each question allows one wrong attempt (no penalty). After one wrong attempt, the wrong option/input is shown as wrong. Second wrong attempt or timeout = 0 pts.<br>
+          Scoring (by speed, when answered correctly):<br>
+          • 0–15s: MCQ 2 pts, Typing 4 pts<br>
+          • 15–25s: MCQ 1.5 pts, Typing 3 pts<br>
+          • 25–30s: MCQ 1 pt, Typing 2.5 pts<br>
+          Questions are sampled randomly from the hiragana sound pool, with no repeats across 35 questions.
         </div>
       </div>
       <button class="btn primary" id="btnStart">Start</button>
-    </div>
-    <div class="list">
-      Classroom use: ask students to screenshot the final score. For each mistake, write the kana and romaji three times.
     </div>
   </section>
 
@@ -111,7 +126,7 @@
 
     <div class="timerwrap">
       <div class="bar"><div id="barFill"></div></div>
-      <div class="timeleft">Remaining: <span id="timeLeftText">15</span>s</div>
+      <div class="timeleft">Remaining: <span id="timeLeftText">30</span>s</div>
     </div>
 
     <!-- MCQ -->
@@ -124,7 +139,7 @@
         <button class="btn primary" id="btnSubmit">Submit</button>
       </div>
       <div class="muted" style="text-align:center;margin-top:8px">
-        Input rules: case-insensitive; spaces are ignored. For ぢ/づ, answers are ji2/zu2 to avoid confusion with じ/ず.
+        Input rules: case-insensitive; spaces are ignored. For ぢ/づ, answers are ji2/zu2.
       </div>
     </div>
 
@@ -156,7 +171,6 @@
 
 <script>
 /* ===================== Hiragana sound pool (basic + dakuon/handakuon + yoon) ===================== */
-/* Unique key (romaji) identifies each sound item. */
 const KANA = [
   // Basic
   ["a","あ"],["i","い"],["u","う"],["e","え"],["o","お"],
@@ -206,20 +220,26 @@ function clamp(n,min,max){return Math.max(min,Math.min(max,n));}
 const MCQ_COUNT = 20;
 const TYPE_COUNT = 15;
 const TOTAL_Q = MCQ_COUNT + TYPE_COUNT;
-const TIME_PER_Q = 15;
+
+const TIME_PER_Q = 30;
 
 const MCQ_FULL = 2;
 const TYPE_FULL = 4;
 
-/* Delay rules */
 const DELAY_CORRECT_MS = 700;
 const DELAY_WRONG_MS = 2000;
 
-/* Full: timeLeft>=10; Half: timeLeft>=5; else minimum */
-function scoreForCorrect(maxScore, timeLeft){
-  if(timeLeft >= 10) return maxScore;
-  if(timeLeft >= 5) return maxScore/2;
-  return (maxScore === MCQ_FULL) ? 0.5 : 1;
+/*
+Scoring tiers are based on time used:
+0–15s => timeLeft >= 15
+15–25s => timeLeft >= 5
+25–30s => timeLeft < 5
+*/
+function scoreForCorrect(mode, timeLeft){
+  const isMcq = (mode === "mcq");
+  if(timeLeft >= 15) return isMcq ? 2   : 4;
+  if(timeLeft >= 5)  return isMcq ? 1.5 : 3;
+  return               isMcq ? 1   : 2.5;
 }
 
 /* ===================== DOM ===================== */
@@ -273,13 +293,16 @@ let scoreMc = 0;
 let scoreTy = 0;
 
 let correctCount = 0;
-let mistakes = []; // {hira, key, answer, correctKey, mode, timedOut}
+let mistakes = [];
+
+/* per-question attempt tracking */
+let wrongUsed = false; // one free wrong attempt per question
 
 function setHeader(){
   qTotalEl.textContent = String(TOTAL_Q);
   qIndexEl.textContent = String(qPtr);
   tLeftEl.textContent = String(timeLeft);
-  scoreEl.textContent = String(scoreTotal.toFixed(1)).replace(/\.0$/,"");
+  scoreEl.textContent = scoreTotal.toFixed(1).replace(/\.0$/,"");
 
   const mcDone = Math.min(qPtr, MCQ_COUNT);
   const tyDone = Math.max(0, qPtr - MCQ_COUNT);
@@ -320,15 +343,11 @@ function updateTimerUI(){
 /* ===================== Build questions: 35 unique hiragana items ===================== */
 function buildQuestions(){
   if(KANA.length < TOTAL_Q) throw new Error("The pool is too small to sample 35 unique questions.");
-
-  const picked = shuffle([...KANA]).slice(0, TOTAL_Q); // unique items
+  const picked = shuffle([...KANA]).slice(0, TOTAL_Q);
   const q = [];
   for(let i=0;i<TOTAL_Q;i++){
     const [key, hira] = picked[i];
-    q.push({
-      mode: (i < MCQ_COUNT) ? "mcq" : "type",
-      key, hira
-    });
+    q.push({ mode: (i < MCQ_COUNT) ? "mcq" : "type", key, hira });
   }
   return q;
 }
@@ -341,6 +360,8 @@ function renderQuestion(){
   romajiInput.disabled = false;
   btnSubmit.disabled = false;
   btnSkip.disabled = false;
+
+  wrongUsed = false;
 
   setHeader();
 
@@ -355,7 +376,7 @@ function renderQuestion(){
   if(q.mode === "mcq"){
     stageHint.textContent = `MCQ (Q${qPtr+1} / ${TOTAL_Q})`;
     qPrompt.textContent = "Choose the correct romaji";
-    scoreRuleHint.textContent = "Worth 2 pts: ≥10s = 2; ≥5s = 1; <5s = 0.5; wrong/timeout = 0.";
+    scoreRuleHint.textContent = "One free wrong attempt. Correct scoring: 0–15s: 2; 15–25s: 1.5; 25–30s: 1.";
 
     mcqArea.classList.remove("hidden");
     typeArea.classList.add("hidden");
@@ -365,14 +386,14 @@ function renderQuestion(){
       const div = document.createElement("div");
       div.className = "choice";
       div.textContent = opt;
-      div.addEventListener("click", ()=>submitMcq(opt));
+      div.addEventListener("click", ()=>submitMcq(opt, div));
       mcqArea.appendChild(div);
     });
 
   }else{
     stageHint.textContent = `Romaji typing (Q${qPtr+1} / ${TOTAL_Q})`;
     qPrompt.textContent = "Type the correct romaji";
-    scoreRuleHint.textContent = "Worth 4 pts: ≥10s = 4; ≥5s = 2; <5s = 1; wrong/timeout = 0.";
+    scoreRuleHint.textContent = "One free wrong attempt. Correct scoring: 0–15s: 4; 15–25s: 3; 25–30s: 2.5.";
 
     mcqArea.classList.add("hidden");
     typeArea.classList.remove("hidden");
@@ -383,92 +404,126 @@ function renderQuestion(){
 }
 
 function buildMcqOptions(correctKey){
-  // 3 distractors from other keys; unique within the same question
   const keys = KANA.map(x=>x[0]).filter(k=>k !== correctKey);
   shuffle(keys);
   const distractors = keys.slice(0,3);
   return shuffle([correctKey, ...distractors]);
 }
 
-/* ===================== Submit & scoring ===================== */
-function lockInputs(){
+/* ===================== End question helpers ===================== */
+function lockAllInputs(){
   btnSkip.disabled = true;
   romajiInput.disabled = true;
   btnSubmit.disabled = true;
   [...mcqArea.querySelectorAll(".choice")].forEach(x=>x.style.pointerEvents="none");
 }
-
 function awardPoints(mode, points){
   scoreTotal += points;
   if(mode === "mcq") scoreMc += points;
   else scoreTy += points;
-
   scoreEl.textContent = scoreTotal.toFixed(1).replace(/\.0$/,"");
 }
-
-function showCorrectChoiceVisual(correctKey, selectedKey){
+function revealCorrectMcq(correctKey){
   [...mcqArea.querySelectorAll(".choice")].forEach(div=>{
     if(div.textContent === correctKey) div.classList.add("correct");
-    if(div.textContent === selectedKey && selectedKey !== correctKey) div.classList.add("wrong");
   });
 }
 
-function submitMcq(selected){
-  stopTimer();
-  lockInputs();
-
+/* ===================== MCQ submit with one free wrong attempt ===================== */
+function submitMcq(selected, elDiv){
   const q = questions[qPtr];
-  const isCorrect = (selected === q.key);
-  const pts = isCorrect ? scoreForCorrect(MCQ_FULL, timeLeft) : 0;
 
-  showCorrectChoiceVisual(q.key, selected);
+  // already marked wrong -> ignore
+  if(elDiv.classList.contains("wrong")) return;
 
-  if(isCorrect){
+  if(selected === q.key){
+    stopTimer();
+    lockAllInputs();
+    revealCorrectMcq(q.key);
+
+    const pts = scoreForCorrect("mcq", timeLeft);
     awardPoints("mcq", pts);
     correctCount++;
     feedback.innerHTML = `<span class="ok">Correct</span>. Points: ${pts}.`;
-  }else{
-    mistakes.push({hira:q.hira, key:q.key, answer:selected, correctKey:q.key, mode:"mcq", timedOut:false});
-    feedback.innerHTML = `<span class="no">Wrong</span>. Correct answer: <b>${q.key}</b>. Points: 0.`;
+
+    setTimeout(nextQuestion, DELAY_CORRECT_MS);
+    return;
   }
 
-  setTimeout(nextQuestion, isCorrect ? DELAY_CORRECT_MS : DELAY_WRONG_MS);
+  // wrong selection
+  elDiv.classList.add("wrong");
+  elDiv.style.pointerEvents = "none";
+
+  if(!wrongUsed){
+    wrongUsed = true;
+    feedback.innerHTML = `<span class="no">Wrong</span>. One more try.`;
+    return; // keep timer running, allow second attempt
+  }
+
+  // second wrong ends question
+  stopTimer();
+  lockAllInputs();
+  revealCorrectMcq(q.key);
+  mistakes.push({hira:q.hira, key:q.key, answer:selected, correctKey:q.key, mode:"mcq", timedOut:false});
+  feedback.innerHTML = `<span class="no">Wrong</span>. Correct answer: <b>${q.key}</b>. Points: 0.`;
+
+  setTimeout(nextQuestion, DELAY_WRONG_MS);
 }
 
+/* ===================== Typing submit with one free wrong attempt ===================== */
 function submitTyping(){
-  stopTimer();
-  lockInputs();
-
   const q = questions[qPtr];
   const typed = normRomaji(romajiInput.value);
-  const isCorrect = (typed === normRomaji(q.key));
-  const pts = isCorrect ? scoreForCorrect(TYPE_FULL, timeLeft) : 0;
 
-  if(isCorrect){
+  if(typed === normRomaji(q.key)){
+    stopTimer();
+    lockAllInputs();
+
+    const pts = scoreForCorrect("type", timeLeft);
     awardPoints("type", pts);
     correctCount++;
     feedback.innerHTML = `<span class="ok">Correct</span>. Points: ${pts}.`;
-  }else{
-    mistakes.push({hira:q.hira, key:q.key, answer:typed || "(empty)", correctKey:q.key, mode:"type", timedOut:false});
-    feedback.innerHTML = `<span class="no">Wrong</span>. Correct answer: <b>${q.key}</b>. Points: 0.`;
+
+    setTimeout(nextQuestion, DELAY_CORRECT_MS);
+    return;
   }
 
-  setTimeout(nextQuestion, isCorrect ? DELAY_CORRECT_MS : DELAY_WRONG_MS);
+  // wrong typed
+  if(!wrongUsed){
+    wrongUsed = true;
+    feedback.innerHTML = `<span class="no">Wrong</span>. One more try.`;
+    romajiInput.value = "";
+    romajiInput.focus();
+    return; // keep timer running
+  }
+
+  // second wrong ends question
+  stopTimer();
+  lockAllInputs();
+  mistakes.push({hira:q.hira, key:q.key, answer:typed || "(empty)", correctKey:q.key, mode:"type", timedOut:false});
+  feedback.innerHTML = `<span class="no">Wrong</span>. Correct answer: <b>${q.key}</b>. Points: 0.`;
+
+  setTimeout(nextQuestion, DELAY_WRONG_MS);
 }
 
 function handleTimeout(){
-  lockInputs();
+  lockAllInputs();
   const q = questions[qPtr];
   mistakes.push({hira:q.hira, key:q.key, answer:"(timeout)", correctKey:q.key, mode:q.mode, timedOut:true});
+
+  // show correct answer on timeout
+  if(q.mode === "mcq") revealCorrectMcq(q.key);
+
   feedback.innerHTML = `<span class="no">Time’s up</span>. Points: 0. Correct answer: <b>${q.key}</b>.`;
   setTimeout(nextQuestion, DELAY_WRONG_MS);
 }
 
 function skipQuestion(){
   stopTimer();
-  lockInputs();
+  lockAllInputs();
   const q = questions[qPtr];
   mistakes.push({hira:q.hira, key:q.key, answer:"(skipped)", correctKey:q.key, mode:q.mode, timedOut:false});
+  if(q.mode === "mcq") revealCorrectMcq(q.key);
   feedback.innerHTML = `<span class="no">Skipped</span>. Points: 0. Correct answer: <b>${q.key}</b>.`;
   setTimeout(nextQuestion, DELAY_WRONG_MS);
 }
@@ -493,7 +548,6 @@ function finishGame(){
   if(mistakes.length === 0){
     mistakeList.textContent = "Mistakes: none";
   }else{
-    // unique mistakes (by kana + answer key + mode), keep order
     const seen = new Set();
     const lines = [];
     for(const m of mistakes){
@@ -557,6 +611,8 @@ romajiInput.addEventListener("keydown", (e)=>{
 /* Init header */
 qTotalEl.textContent = String(TOTAL_Q);
 stageName.textContent = "Not started";
+tLeftEl.textContent = String(TIME_PER_Q);
+timeLeftText.textContent = String(TIME_PER_Q);
 </script>
 </body>
 </html>
